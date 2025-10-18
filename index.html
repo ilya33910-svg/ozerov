@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Галерея художника — swipe, day/night, glass</title>
+  <style>
+    /* ==== ТЕМА ======================================================== */
+    :root{
+      --bg:#0b0e13; --fg:#e9eef6; --muted:#9aa3b2; --line:#1d2330; --glass:rgba(18,22,30,.45); --acc:#3b82f6;
+      --shadow: 0 12px 35px rgba(0,0,0,.45);
+    }
+    :root.light{
+      --bg:#f7f8fc; --fg:#0f1220; --muted:#55607a; --line:#dfe3ee; --glass:rgba(255,255,255,.55); --acc:#2563eb;
+      --shadow: 0 10px 28px rgba(0,0,0,.12);
+    }
+
+    /* ==== БАЗА ======================================================== */
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
+    .app{height:100%;display:grid;grid-template-rows:auto 1fr}
+
+    /* ==== ХЕДЕР ======================================================= */
+    header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;gap:8px;border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .logo{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#6ee7ff,#3b82f6,#9333ea)}
+    .title{font-weight:700;letter-spacing:.2px}
+
+    .leftStack{display:flex;align-items:center;gap:8px}
+    .collections{position:relative}
+    .collections button{border:1px solid var(--line);background:transparent;color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+    .menu{position:absolute;top:100%;left:0;min-width:220px;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px;display:none;z-index:5}
+    .menu.open{display:block}
+    .menu .item{display:flex;justify-content:space-between;gap:8px;padding:8px;border-radius:8px;cursor:pointer}
+    .menu .item:hover{background:rgba(128,128,128,.08)}
+    .count{color:var(--muted);font-size:12px}
+
+    .tools{display:flex;align-items:center;gap:8px}
+    .btn{border:1px solid var(--line);background:transparent;color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+
+    /* ==== СЦЕНА/КАДР ================================================== */
+    .stage{position:relative;height:calc(100vh - 58px);overflow:hidden}
+    .slide{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity .35s ease}
+    .slide.active{opacity:1}
+    .art{position:relative;width:100%;height:100%}
+    .art img{position:absolute;inset:0;margin:auto;max-width:100%;max-height:100%;object-fit:contain;filter:drop-shadow(0 12px 24px rgba(0,0,0,.35))}
+
+    /* Стеклянные подписи */
+    .glass{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:10px;align-items:center;backdrop-filter: blur(10px);-webkit-backdrop-filter: blur(10px);background:var(--glass);border:1px solid var(--line);padding:10px 14px;border-radius:12px;color:var(--fg);box-shadow:var(--shadow)}
+    .name{font-weight:700}
+    .meta{color:var(--muted)}
+
+    /* Стрелки */
+    .nav{position:absolute;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;backdrop-filter: blur(8px);background:var(--glass);border:1px solid var(--line);box-shadow:var(--shadow);cursor:pointer;user-select:none}
+    .nav:hover{transform:translateY(-50%) scale(1.06)}
+    .prev{left:14px}
+    .next{right:14px}
+
+    /* Индикатор/прогресс */
+    .progress{position:absolute;left:50%;top:12px;transform:translateX(-50%);display:flex;gap:4px}
+    .dot{width:24px;height:4px;border-radius:4px;background:rgba(255,255,255,.18)}
+    .dot.on{background:var(--acc)}
+
+    /* Кен-Бёрнс (мягкий зум+пан) */
+    @keyframes ken1 { 0% { transform: scale(1) translate(0,0)} 100%{ transform: scale(1.08) translate(10px, -6px)} }
+    @keyframes ken2 { 0% { transform: scale(1.02) translate(0,0)} 100%{ transform: scale(1.12) translate(-8px, 10px)} }
+    .kenburns-1{ animation: ken1 18s ease-in-out forwards }
+    .kenburns-2{ animation: ken2 18s ease-in-out forwards }
+
+    /* Подсказка свайпа (мобильные) */
+    .hint{position:absolute;bottom:72px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted)}
+
+    /* Адаптив */
+    @media (max-width:680px){
+      .glass{left:12px;right:12px;transform:none}
+      .nav{width:44px;height:44px}
+      .progress{display:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="leftStack">
+        <div class="brand"><div class="logo"></div><div class="title">Галерея</div></div>
+        <div class="collections" id="collections">
+          <button id="collectionsBtn">Коллекции</button>
+          <div class="menu" id="collectionsMenu"></div>
+        </div>
+      </div>
+      <div class="tools">
+        <button class="btn" id="themeBtn" title="Ночь/День">Ночь/День</button>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <!-- Слайды создаются скриптом -->
+      <div class="nav prev" id="prev" aria-label="Предыдущая">◀</div>
+      <div class="nav next" id="next" aria-label="Следующая">▶</div>
+      <div class="progress" id="progress"></div>
+      <div class="hint" id="hint">Свайпайте влево/вправо</div>
+    </main>
+  </div>
+
+  <script>
+  // ===== ДАННЫЕ ========================================================
+  // Замените src на свои файлы (например, ./assets/series-name/work-01.jpg)
+  const DATA = {
+    collections: [
+      { key:'all', name:'Все работы' },
+      { key:'city', name:'Город' },
+      { key:'nature', name:'Природа' },
+      { key:'abstract', name:'Абстракция' },
+      { key:'portraits', name:'Портреты' },
+      { key:'maps', name:'Карты' },
+    ],
+    works: [
+      W('city', 'Ночной дождь', '60×80 см', 'холст, масло', 'https://picsum.photos/seed/city1/1600/1000'),
+      W('city', 'Станция метро', '50×70 см', 'бумага, акрил', 'https://picsum.photos/seed/city2/1600/1000'),
+      W('nature', 'Сосновый воздух', '40×60 см', 'холст, масло', 'https://picsum.photos/seed/nature1/1600/1000'),
+      W('nature', 'Штиль', '80×80 см', 'холст, масло', 'https://picsum.photos/seed/nature2/1600/1000'),
+      W('abstract', 'Гравитация форм', '90×60 см', 'смешанная техника', 'https://picsum.photos/seed/abs1/1600/1000'),
+      W('portraits', 'Взгляд', '40×50 см', 'бумага, уголь', 'https://picsum.photos/seed/port1/1600/1000'),
+      W('maps', 'Карта памяти', '70×70 см', 'холст, тушь', 'https://picsum.photos/seed/map1/1600/1000'),
+      // добавляйте свои работы сюда
+    ]
+  };
+  function W(series, name, size, materials, src){ return {series, name, size, materials, src} }
+
+  // ===== СОСТОЯНИЕ =====================================================
+  const state = {
+    idx: 0,
+    filter: 'all',
+    idleTimer: null,
+    idleDelayMs: 2600, // "длительный просмотр" перед запуском движения
+    kenToggle: false,
+    list: [],
+  };
+
+  // ===== ЭЛЕМЕНТЫ ======================================================
+  const root = document.documentElement;
+  const stage = document.getElementById('stage');
+  const btnPrev = document.getElementById('prev');
+  const btnNext = document.getElementById('next');
+  const progress = document.getElementById('progress');
+  const hint = document.getElementById('hint');
+  const collBtn = document.getElementById('collectionsBtn');
+  const collMenu = document.getElementById('collectionsMenu');
+  const themeBtn = document.getElementById('themeBtn');
+
+  // ===== ТЕМА ==========================================================
+  (function initTheme(){
+    const saved = localStorage.getItem('theme');
+    if(saved==='light') root.classList.add('light');
+    themeBtn.onclick = ()=>{
+      root.classList.toggle('light');
+      localStorage.setItem('theme', root.classList.contains('light')? 'light':'dark');
+    }
+  })();
+
+  // ===== МЕНЮ КОЛЛЕКЦИЙ ================================================
+  function renderCollections(){
+    collMenu.innerHTML = '';
+    for(const c of DATA.collections){
+      const count = DATA.works.filter(w=> c.key==='all' || w.series===c.key).length;
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.innerHTML = `<span>${c.name}</span><span class="count">${count}</span>`;
+      div.onclick = ()=>{ setFilter(c.key); collMenu.classList.remove('open') };
+      collMenu.appendChild(div);
+    }
+  }
+  collBtn.onclick = ()=> collMenu.classList.toggle('open');
+  document.addEventListener('click', (e)=>{
+    if(!collMenu.contains(e.target) && e.target!==collBtn){ collMenu.classList.remove('open') }
+  });
+
+  // ===== РЕНДЕР СЛАЙДОВ ================================================
+  function setFilter(key){
+    state.filter = key;
+    state.list = DATA.works.filter(w=> key==='all' || w.series===key);
+    if(!state.list.length) return;
+    state.idx = 0; buildSlides(); show(0); buildProgress();
+  }
+
+  function buildSlides(){
+    // Очистить старые
+    stage.querySelectorAll('.slide').forEach(n=>n.remove());
+    // Создать новые
+    state.list.forEach((w,i)=>{
+      const slide = document.createElement('div');
+      slide.className = 'slide';
+      const art = document.createElement('div'); art.className='art';
+      const img = document.createElement('img'); img.alt = w.name; img.src = w.src;
+      const glass = document.createElement('div'); glass.className='glass';
+      glass.innerHTML = `<span class="name">${esc(w.name)}</span><span class="meta">${esc(w.size)} • ${esc(w.materials)}</span>`;
+      art.appendChild(img); art.appendChild(glass); slide.appendChild(art); stage.appendChild(slide);
+    });
+  }
+
+  function buildProgress(){
+    progress.innerHTML = '';
+    state.list.forEach((_,i)=>{
+      const d = document.createElement('div'); d.className='dot'; progress.appendChild(d);
+    });
+  }
+
+  function show(i){
+    state.idx = (i + state.list.length) % state.list.length; // бесконечный цикл
+    const slides = [...stage.querySelectorAll('.slide')];
+    slides.forEach((s,idx)=> s.classList.toggle('active', idx===state.idx));
+    [...progress.children].forEach((d,idx)=> d.classList.toggle('on', idx===state.idx));
+    resetIdleMotion();
+  }
+
+  function next(){ show(state.idx+1) }
+  function prev(){ show(state.idx-1) }
+
+  btnNext.onclick = next; btnPrev.onclick = prev;
+
+  // Клавиатура
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==='ArrowRight') next(); else if(e.key==='ArrowLeft') prev();
+  });
+
+  // Свайпы
+  let touchX=null, touchY=null;
+  stage.addEventListener('touchstart', e=>{ const t=e.changedTouches[0]; touchX=t.clientX; touchY=t.clientY; stopIdleMotion(); },{passive:true});
+  stage.addEventListener('touchend', e=>{
+    const t=e.changedTouches[0]; const dx=t.clientX-touchX; const dy=Math.abs(t.clientY-touchY);
+    if(Math.abs(dx)>40 && dy<80){ dx<0? next(): prev(); }
+    startIdleTimer();
+  },{passive:true});
+
+  // Колесо мыши (горизонтальная навигация)
+  stage.addEventListener('wheel', e=>{ if(Math.abs(e.deltaX)+Math.abs(e.deltaY)>0){ e.deltaY>0||e.deltaX>0? next(): prev(); stopIdleMotion(); startIdleTimer(); }} ,{passive:true});
+
+  // ===== КЕН-БЁРНС ПО НЕАКТИВНОСТИ =====================================
+  function startIdleTimer(){
+    clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(()=> applyKenBurns(true), state.idleDelayMs);
+  }
+  function resetIdleMotion(){
+    applyKenBurns(false); startIdleTimer(); hint.style.opacity = .0;
+  }
+  function stopIdleMotion(){ applyKenBurns(false); clearTimeout(state.idleTimer); }
+
+  function applyKenBurns(on){
+    const active = stage.querySelector('.slide.active img');
+    if(!active) return;
+    active.classList.remove('kenburns-1','kenburns-2');
+    if(on){ active.classList.add(state.kenToggle? 'kenburns-1':'kenburns-2'); state.kenToggle=!state.kenToggle; }
+  }
+
+  // ===== УТИЛЫ =========================================================
+  function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+
+  // ===== ИНИТ ==========================================================
+  renderCollections();
+  setFilter('all');
+  startIdleTimer();
+  </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Галерея художника — swipe, day/night, glass</title>
+  <style>
+    /* ==== ТЕМА ======================================================== */
+    :root{
+      --bg:#0b0e13; --fg:#e9eef6; --muted:#9aa3b2; --line:#1d2330; --glass:rgba(18,22,30,.45); --acc:#3b82f6;
+      --shadow: 0 12px 35px rgba(0,0,0,.45);
+    }
+    :root.light{
+      --bg:#f7f8fc; --fg:#0f1220; --muted:#55607a; --line:#dfe3ee; --glass:rgba(255,255,255,.55); --acc:#2563eb;
+      --shadow: 0 10px 28px rgba(0,0,0,.12);
+    }
+
+    /* ==== БАЗА ======================================================== */
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
+    .app{height:100%;display:grid;grid-template-rows:auto 1fr}
+
+    /* ==== ХЕДЕР ======================================================= */
+    header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;gap:8px;border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:10px}
+    .logo{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#6ee7ff,#3b82f6,#9333ea)}
+    .title{font-weight:700;letter-spacing:.2px}
+
+    .leftStack{display:flex;align-items:center;gap:8px}
+    .collections{position:relative}
+    .collections button{border:1px solid var(--line);background:transparent;color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+    .menu{position:absolute;top:100%;left:0;min-width:220px;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px;display:none;z-index:5}
+    .menu.open{display:block}
+    .menu .item{display:flex;justify-content:space-between;gap:8px;padding:8px;border-radius:8px;cursor:pointer}
+    .menu .item:hover{background:rgba(128,128,128,.08)}
+    .count{color:var(--muted);font-size:12px}
+
+    .tools{display:flex;align-items:center;gap:8px}
+    .btn{border:1px solid var(--line);background:transparent;color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+
+    /* ==== СЦЕНА/КАДР ================================================== */
+    .stage{position:relative;height:calc(100vh - 58px);overflow:hidden}
+    .slide{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity .35s ease}
+    .slide.active{opacity:1}
+    .art{position:relative;width:100%;height:100%}
+    .art img{position:absolute;inset:0;margin:auto;max-width:100%;max-height:100%;object-fit:contain;filter:drop-shadow(0 12px 24px rgba(0,0,0,.35))}
+
+    /* Стеклянные подписи */
+    .glass{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:10px;align-items:center;backdrop-filter: blur(10px);-webkit-backdrop-filter: blur(10px);background:var(--glass);border:1px solid var(--line);padding:10px 14px;border-radius:12px;color:var(--fg);box-shadow:var(--shadow)}
+    .name{font-weight:700}
+    .meta{color:var(--muted)}
+
+    /* Стрелки */
+    .nav{position:absolute;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;backdrop-filter: blur(8px);background:var(--glass);border:1px solid var(--line);box-shadow:var(--shadow);cursor:pointer;user-select:none}
+    .nav:hover{transform:translateY(-50%) scale(1.06)}
+    .prev{left:14px}
+    .next{right:14px}
+
+    /* Индикатор/прогресс */
+    .progress{position:absolute;left:50%;top:12px;transform:translateX(-50%);display:flex;gap:4px}
+    .dot{width:24px;height:4px;border-radius:4px;background:rgba(255,255,255,.18)}
+    .dot.on{background:var(--acc)}
+
+    /* Кен-Бёрнс (мягкий зум+пан) */
+    @keyframes ken1 { 0% { transform: scale(1) translate(0,0)} 100%{ transform: scale(1.08) translate(10px, -6px)} }
+    @keyframes ken2 { 0% { transform: scale(1.02) translate(0,0)} 100%{ transform: scale(1.12) translate(-8px, 10px)} }
+    .kenburns-1{ animation: ken1 18s ease-in-out forwards }
+    .kenburns-2{ animation: ken2 18s ease-in-out forwards }
+
+    /* Подсказка свайпа (мобильные) */
+    .hint{position:absolute;bottom:72px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted)}
+
+    /* Адаптив */
+    @media (max-width:680px){
+      .glass{left:12px;right:12px;transform:none}
+      .nav{width:44px;height:44px}
+      .progress{display:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="leftStack">
+        <div class="brand"><div class="logo"></div><div class="title">Галерея</div></div>
+        <div class="collections" id="collections">
+          <button id="collectionsBtn">Коллекции</button>
+          <div class="menu" id="collectionsMenu"></div>
+        </div>
+      </div>
+      <div class="tools">
+        <button class="btn" id="themeBtn" title="Ночь/День">Ночь/День</button>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <!-- Слайды создаются скриптом -->
+      <div class="nav prev" id="prev" aria-label="Предыдущая">◀</div>
+      <div class="nav next" id="next" aria-label="Следующая">▶</div>
+      <div class="progress" id="progress"></div>
+      <div class="hint" id="hint">Свайпайте влево/вправо</div>
+    </main>
+  </div>
+
+  <script>
+  // ===== ДАННЫЕ ========================================================
+  // Замените src на свои файлы (например, ./assets/series-name/work-01.jpg)
+  const DATA = {
+    collections: [
+      { key:'all', name:'Все работы' },
+      { key:'city', name:'Город' },
+      { key:'nature', name:'Природа' },
+      { key:'abstract', name:'Абстракция' },
+      { key:'portraits', name:'Портреты' },
+      { key:'maps', name:'Карты' },
+    ],
+    works: [
+      W('city', 'Ночной дождь', '60×80 см', 'холст, масло', 'https://picsum.photos/seed/city1/1600/1000'),
+      W('city', 'Станция метро', '50×70 см', 'бумага, акрил', 'https://picsum.photos/seed/city2/1600/1000'),
+      W('nature', 'Сосновый воздух', '40×60 см', 'холст, масло', 'https://picsum.photos/seed/nature1/1600/1000'),
+      W('nature', 'Штиль', '80×80 см', 'холст, масло', 'https://picsum.photos/seed/nature2/1600/1000'),
+      W('abstract', 'Гравитация форм', '90×60 см', 'смешанная техника', 'https://picsum.photos/seed/abs1/1600/1000'),
+      W('portraits', 'Взгляд', '40×50 см', 'бумага, уголь', 'https://picsum.photos/seed/port1/1600/1000'),
+      W('maps', 'Карта памяти', '70×70 см', 'холст, тушь', 'https://picsum.photos/seed/map1/1600/1000'),
+      // добавляйте свои работы сюда
+    ]
+  };
+  function W(series, name, size, materials, src){ return {series, name, size, materials, src} }
+
+  // ===== СОСТОЯНИЕ =====================================================
+  const state = {
+    idx: 0,
+    filter: 'all',
+    idleTimer: null,
+    idleDelayMs: 2600, // "длительный просмотр" перед запуском движения
+    kenToggle: false,
+    list: [],
+  };
+
+  // ===== ЭЛЕМЕНТЫ ======================================================
+  const root = document.documentElement;
+  const stage = document.getElementById('stage');
+  const btnPrev = document.getElementById('prev');
+  const btnNext = document.getElementById('next');
+  const progress = document.getElementById('progress');
+  const hint = document.getElementById('hint');
+  const collBtn = document.getElementById('collectionsBtn');
+  const collMenu = document.getElementById('collectionsMenu');
+  const themeBtn = document.getElementById('themeBtn');
+
+  // ===== ТЕМА ==========================================================
+  (function initTheme(){
+    const saved = localStorage.getItem('theme');
+    if(saved==='light') root.classList.add('light');
+    themeBtn.onclick = ()=>{
+      root.classList.toggle('light');
+      localStorage.setItem('theme', root.classList.contains('light')? 'light':'dark');
+    }
+  })();
+
+  // ===== МЕНЮ КОЛЛЕКЦИЙ ================================================
+  function renderCollections(){
+    collMenu.innerHTML = '';
+    for(const c of DATA.collections){
+      const count = DATA.works.filter(w=> c.key==='all' || w.series===c.key).length;
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.innerHTML = `<span>${c.name}</span><span class="count">${count}</span>`;
+      div.onclick = ()=>{ setFilter(c.key); collMenu.classList.remove('open') };
+      collMenu.appendChild(div);
+    }
+  }
+  collBtn.onclick = ()=> collMenu.classList.toggle('open');
+  document.addEventListener('click', (e)=>{
+    if(!collMenu.contains(e.target) && e.target!==collBtn){ collMenu.classList.remove('open') }
+  });
+
+  // ===== РЕНДЕР СЛАЙДОВ ================================================
+  function setFilter(key){
+    state.filter = key;
+    state.list = DATA.works.filter(w=> key==='all' || w.series===key);
+    if(!state.list.length) return;
+    state.idx = 0; buildSlides(); show(0); buildProgress();
+  }
+
+  function buildSlides(){
+    // Очистить старые
+    stage.querySelectorAll('.slide').forEach(n=>n.remove());
+    // Создать новые
+    state.list.forEach((w,i)=>{
+      const slide = document.createElement('div');
+      slide.className = 'slide';
+      const art = document.createElement('div'); art.className='art';
+      const img = document.createElement('img'); img.alt = w.name; img.src = w.src;
+      const glass = document.createElement('div'); glass.className='glass';
+      glass.innerHTML = `<span class="name">${esc(w.name)}</span><span class="meta">${esc(w.size)} • ${esc(w.materials)}</span>`;
+      art.appendChild(img); art.appendChild(glass); slide.appendChild(art); stage.appendChild(slide);
+    });
+  }
+
+  function buildProgress(){
+    progress.innerHTML = '';
+    state.list.forEach((_,i)=>{
+      const d = document.createElement('div'); d.className='dot'; progress.appendChild(d);
+    });
+  }
+
+  function show(i){
+    state.idx = (i + state.list.length) % state.list.length; // бесконечный цикл
+    const slides = [...stage.querySelectorAll('.slide')];
+    slides.forEach((s,idx)=> s.classList.toggle('active', idx===state.idx));
+    [...progress.children].forEach((d,idx)=> d.classList.toggle('on', idx===state.idx));
+    resetIdleMotion();
+  }
+
+  function next(){ show(state.idx+1) }
+  function prev(){ show(state.idx-1) }
+
+  btnNext.onclick = next; btnPrev.onclick = prev;
+
+  // Клавиатура
+  window.addEventListener('keydown', (e)=>{
+    if(e.key==='ArrowRight') next(); else if(e.key==='ArrowLeft') prev();
+  });
+
+  // Свайпы
+  let touchX=null, touchY=null;
+  stage.addEventListener('touchstart', e=>{ const t=e.changedTouches[0]; touchX=t.clientX; touchY=t.clientY; stopIdleMotion(); },{passive:true});
+  stage.addEventListener('touchend', e=>{
+    const t=e.changedTouches[0]; const dx=t.clientX-touchX; const dy=Math.abs(t.clientY-touchY);
+    if(Math.abs(dx)>40 && dy<80){ dx<0? next(): prev(); }
+    startIdleTimer();
+  },{passive:true});
+
+  // Колесо мыши (горизонтальная навигация)
+  stage.addEventListener('wheel', e=>{ if(Math.abs(e.deltaX)+Math.abs(e.deltaY)>0){ e.deltaY>0||e.deltaX>0? next(): prev(); stopIdleMotion(); startIdleTimer(); }} ,{passive:true});
+
+  // ===== КЕН-БЁРНС ПО НЕАКТИВНОСТИ =====================================
+  function startIdleTimer(){
+    clearTimeout(state.idleTimer);
+    state.idleTimer = setTimeout(()=> applyKenBurns(true), state.idleDelayMs);
+  }
+  function resetIdleMotion(){
+    applyKenBurns(false); startIdleTimer(); hint.style.opacity = .0;
+  }
+  function stopIdleMotion(){ applyKenBurns(false); clearTimeout(state.idleTimer); }
+
+  function applyKenBurns(on){
+    const active = stage.querySelector('.slide.active img');
+    if(!active) return;
+    active.classList.remove('kenburns-1','kenburns-2');
+    if(on){ active.classList.add(state.kenToggle? 'kenburns-1':'kenburns-2'); state.kenToggle=!state.kenToggle; }
+  }
+
+  // ===== УТИЛЫ =========================================================
+  function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+
+  // ===== ИНИТ ==========================================================
+  renderCollections();
+  setFilter('all');
+  startIdleTimer();
+  </script>
+</body>
+</html>
